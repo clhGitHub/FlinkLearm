@@ -15,7 +15,7 @@ object KafkaSalaStream {
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
 
     //配置kafka参数
-    val properties = new Properties()
+    //val properties = new Properties()
 
     properties.setProperty("bootstrap.servers","hadoop102:9092")
     //properties.setProperty("group.id","consumer-group")
