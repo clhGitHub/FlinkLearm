@@ -1,14 +1,24 @@
+import java.lang
+import java.util.{Date, Properties}
+
 import kafka.common.TopicAndPartition
 import kafka.message.MessageAndMetadata
+import org.apache.hadoop.hbase.client.Table
+import org.apache.hadoop.hbase.util.Bytes
+import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka.KafkaCluster.Err
-import org.apache.spark.streaming.kafka.{KafkaCluster, KafkaUtils}
+import org.apache.spark.streaming.kafka.{KafkaCluster, KafkaUtils,HasOffsetRanges,OffsetRange}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
+import scala.collection.immutable.HashMap
+import utils.{DateUtils, HBaseUtils, JsonUtils, StartupReportLogs}
 object KafkaToHbase {
 
 
   def getOffset(kafkaCluster: KafkaCluster, groupId: String, topic: String) :Map[TopicAndPartition,Long]={
+    //16、声明一个主题分区对应的offset
+    var partitionToLong = new HashMap[TopicAndPartition, Long]()
 
     //11、获取主题分区
     val topicAndPartitions: Either[Err, Set[TopicAndPartition]] = kafkaCluster.getPartitions(Set(topic))
@@ -17,20 +27,45 @@ object KafkaToHbase {
     if(topicAndPartitions.isRight){
 
       //13、取出主题分区
-      val topicAndPartition = topicAndPartitions.right.get
+      val topicAndPartition: Set[TopicAndPartition] = topicAndPartitions.right.get
 
       //14、获取offset
-      kafkaCluster.getConsumerOffsets()
+      val topicAndPartitionToOffsets: Either[Err, Map[TopicAndPartition, Long]] = kafkaCluster.getConsumerOffsets(groupId, topicAndPartition)
 
-
-
+      //15、判断是否消费过
+      if(topicAndPartitionToOffsets.isLeft){
+        //没有消费过，赋值0，从头消费
+        for (tp <- topicAndPartition) {
+          partitionToLong += (tp -> 0)
+        }
+      }else{
+        //消费过数据，取出其中的offset
+        val topicAndPartitionToOffset: Map[TopicAndPartition, Long] = topicAndPartitionToOffsets.right.get
+        partitionToLong ++= topicAndPartitionToOffset
+      }
     }
+    partitionToLong
+  }
 
-    null
+  def setOffset(groupId: String, kafkaCluster: KafkaCluster, kafkaStream: InputDStream[String]): Unit = {
+    kafkaStream.foreachRDD(rdd => {
+      val offsetRanges: Array[OffsetRange] = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
+      for (offsetRange <- offsetRanges) {
+        //获取当前主题以及分区
+        val topicAndPartition: TopicAndPartition = offsetRange.topicAndPartition()
+
+        //取出offset
+        val offset: Long = offsetRange.untilOffset
+
+        //提交offset
+        kafkaCluster.setConsumerOffsets(groupId,Map(topicAndPartition->offset))
+      }
+    })
   }
 
   //3、创建一个方法
   def createFunction(): StreamingContext = {
+    val properties = new Properties()
     //4、创建sparkconf
     val sparkConf = new SparkConf().setAppName("kafka2hbse").setMaster("local[*]")
 
@@ -53,19 +88,39 @@ object KafkaToHbase {
     )
     //10、获取offset
     val kafkaCluster = new KafkaCluster(kafkaParam)
-    getOffset(kafkaCluster,groupId,topic)
+    val partitionToLong: Map[TopicAndPartition, Long] = getOffset(kafkaCluster, groupId, topic)
 
     //8、读取kafka数据
-    KafkaUtils.createDirectStream(
+    val kafkaStream: InputDStream[String] = KafkaUtils.createDirectStream(
       ssc,
       kafkaParam,
       partitionToLong,
-      (messagHandler:MessageAndMetadata[String,String]) => messagHandler.message()
+      (messagHandler: MessageAndMetadata[String, String]) => messagHandler.message()
     )
+    //16、写入hbase
+    kafkaStream.foreachRDD(rdd =>{
+      rdd.foreach(str => {
+        println("**************************")
+        //将json数据转为对象
+        val logs: StartupReportLogs = JsonUtils.json2StartupLog(str)
+        //取出城市和启动时间
+        val ts: lang.Long = logs.getStartTimeInMs
+        val city: String = logs.getCity
 
+        val time: String = DateUtils.dateToString(new Date(ts))
 
+        //拼接rowkey
+        val rowkey: String = city + time
 
-    null
+        //获取HBase表对象，这行代码最好放到外面，不然每条数据都要创建一个表对象
+        val table: Table = HBaseUtils.getHBaseTabel(properties)
+
+        //向表中添加数据
+        table.incrementColumnValue(Bytes.toBytes(rowkey), Bytes.toBytes("info"), Bytes.toBytes("count"), 1L)
+      })
+    })
+    //将offset提交
+    setOffset(groupId,kafkaCluster,kafkaStream)
   }
 
   def main(args: Array[String]): Unit = {
