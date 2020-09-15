@@ -1,4 +1,4 @@
-import java.lang
+import java.{lang, util}
 import java.util.{Date, Properties}
 
 import kafka.common.TopicAndPartition
@@ -11,15 +11,18 @@ import org.apache.spark.streaming.kafka.{HasOffsetRanges, KafkaCluster, KafkaUti
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import utils.{DateUtils, HBaseUtils, JsonUtils, StartupReportLogs}
-import scala.collection.mutable
+
+import scala.collection.immutable.HashMap
+
+
 
 
 object KafkaToHbase {
 
 
-  def getOffset(kafkaCluster: KafkaCluster, groupId: String, topic: String) :mutable.Map[TopicAndPartition,Long]={
+  def getOffset(kafkaCluster: KafkaCluster, groupId: String, topic: String) :Map[TopicAndPartition,Long]={
     //16、声明一个主题分区对应的offset
-    var partitionToLong = new mutable.HashMap[TopicAndPartition, Long]()
+    var partitionToLong = new HashMap[TopicAndPartition, Long]()
 
     //11、获取主题分区
     val topicAndPartitions: Either[Err, Set[TopicAndPartition]] = kafkaCluster.getPartitions(Set(topic))
@@ -129,7 +132,7 @@ object KafkaToHbase {
     // 2、设置checkpoint 目录
     val ckPath: String = "ck/kafkaToBase"
 
-    //1、回复或重新创建ssc
+    //1、恢复或重新创建ssc
     val ssc: StreamingContext = StreamingContext.getActiveOrCreate(ckPath, () => createFunction())
 
     //启动ssc
