@@ -7,18 +7,19 @@ import org.apache.hadoop.hbase.client.Table
 import org.apache.hadoop.hbase.util.Bytes
 import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka.KafkaCluster.Err
-import org.apache.spark.streaming.kafka.{KafkaCluster, KafkaUtils,HasOffsetRanges,OffsetRange}
+import org.apache.spark.streaming.kafka.{HasOffsetRanges, KafkaCluster, KafkaUtils, OffsetRange}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
-
-import scala.collection.immutable.HashMap
 import utils.{DateUtils, HBaseUtils, JsonUtils, StartupReportLogs}
+import scala.collection.mutable
+
+
 object KafkaToHbase {
 
 
-  def getOffset(kafkaCluster: KafkaCluster, groupId: String, topic: String) :Map[TopicAndPartition,Long]={
+  def getOffset(kafkaCluster: KafkaCluster, groupId: String, topic: String) :mutable.Map[TopicAndPartition,Long]={
     //16、声明一个主题分区对应的offset
-    var partitionToLong = new HashMap[TopicAndPartition, Long]()
+    var partitionToLong = new mutable.HashMap[TopicAndPartition, Long]()
 
     //11、获取主题分区
     val topicAndPartitions: Either[Err, Set[TopicAndPartition]] = kafkaCluster.getPartitions(Set(topic))
