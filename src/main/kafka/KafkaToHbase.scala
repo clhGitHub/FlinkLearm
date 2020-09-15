@@ -121,6 +121,7 @@ object KafkaToHbase {
     })
     //将offset提交
     setOffset(groupId,kafkaCluster,kafkaStream)
+    ssc
   }
 
   def main(args: Array[String]): Unit = {
